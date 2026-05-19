@@ -205,7 +205,11 @@ pub struct UsageMetadata {
     #[serde(default)]
     pub prompt_tokens_details: Option<Vec<ModalityTokenCount>>,
     #[serde(default)]
+    pub cache_tokens_details: Option<Vec<ModalityTokenCount>>,
+    #[serde(default)]
     pub response_tokens_details: Option<Vec<ModalityTokenCount>>,
+    #[serde(default)]
+    pub tool_use_prompt_tokens_details: Option<Vec<ModalityTokenCount>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
