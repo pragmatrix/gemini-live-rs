@@ -155,7 +155,8 @@ pub struct ToolResponseMessage {
 #[serde(rename_all = "camelCase")]
 pub struct FunctionResponse {
     /// Must match the `id` from the corresponding [`FunctionCallRequest`](super::server_message::FunctionCallRequest).
-    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub name: String,
     /// Arbitrary JSON result returned to the model.
     ///

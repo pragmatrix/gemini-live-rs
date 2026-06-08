@@ -473,7 +473,7 @@ mod tests {
     fn encode_tool_response() {
         let msg = ClientMessage::ToolResponse(ToolResponseMessage {
             function_responses: vec![FunctionResponse {
-                id: "call_123".into(),
+                id: Some("call_123".into()),
                 name: "get_weather".into(),
                 response: serde_json::json!({"temperature": 72}),
             }],
@@ -603,7 +603,7 @@ mod tests {
         }"#;
         let msg = decode(json).unwrap();
         let tc = msg.tool_call.unwrap();
-        assert_eq!(tc.function_calls[0].id, "call_abc");
+        assert_eq!(tc.function_calls[0].id.as_deref(), Some("call_abc"));
         assert_eq!(tc.function_calls[0].name, "get_weather");
         assert_eq!(tc.function_calls[0].args["city"], "Tokyo");
     }

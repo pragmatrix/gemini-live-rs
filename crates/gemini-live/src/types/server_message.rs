@@ -153,7 +153,8 @@ pub struct ToolCallMessage {
 #[serde(rename_all = "camelCase")]
 pub struct FunctionCallRequest {
     /// Server-assigned call ID — must be echoed back in [`FunctionResponse`](super::client_message::FunctionResponse).
-    pub id: String,
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: String,
     /// Arguments as a JSON object matching the function's declared schema.
     pub args: serde_json::Value,
