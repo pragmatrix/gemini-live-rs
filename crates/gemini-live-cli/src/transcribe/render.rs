@@ -116,11 +116,9 @@ fn total_wrapped_lines(lines: &[Line<'_>], area_width: u16) -> usize {
         .iter()
         .map(|line| {
             let line_width: usize = line.spans.iter().map(|span| span.content.len()).sum();
-            if content_width == 0 {
-                1
-            } else {
-                (line_width / content_width) + 1
-            }
+            line_width
+                .checked_div(content_width)
+                .map_or(1, |wraps| wraps + 1)
         })
         .sum()
 }

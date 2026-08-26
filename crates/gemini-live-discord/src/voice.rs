@@ -572,8 +572,9 @@ fn take_ready_audio_chunk(buffered_pcm: &mut Vec<u8>) -> Option<Vec<u8>> {
 
 fn pcm_i16le_to_f32le_bytes(pcm_i16_le: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity((pcm_i16_le.len() / 2) * 4);
-    for sample in pcm_i16_le.chunks_exact(2) {
-        let value = i16::from_le_bytes([sample[0], sample[1]]) as f32 / i16::MAX as f32;
+    let (samples, _) = pcm_i16_le.as_chunks::<2>();
+    for sample in samples {
+        let value = i16::from_le_bytes(*sample) as f32 / i16::MAX as f32;
         out.extend_from_slice(&value.to_le_bytes());
     }
     out

@@ -233,7 +233,8 @@ fn fill_and_feed_aec_f32(
 
 fn decode_pcm_i16le_to_f32_into(output: &mut Vec<f32>, pcm_i16_le: &[u8]) {
     output.resize(pcm_i16_le.len() / std::mem::size_of::<i16>(), 0.0);
-    for (slot, chunk) in output.iter_mut().zip(pcm_i16_le.chunks_exact(2)) {
-        *slot = i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0;
+    let (samples, _) = pcm_i16_le.as_chunks::<2>();
+    for (slot, chunk) in output.iter_mut().zip(samples) {
+        *slot = i16::from_le_bytes(*chunk) as f32 / 32768.0;
     }
 }

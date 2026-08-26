@@ -86,10 +86,8 @@ mod tests {
     fn encode_f32_clamps_and_round_trips() {
         let bytes = encode_f32_to_pcm_i16le(&[0.0, 1.0, -1.0, 2.0]);
         assert_eq!(bytes.len(), 8);
-        let samples: Vec<i16> = bytes
-            .chunks_exact(2)
-            .map(|b| i16::from_le_bytes([b[0], b[1]]))
-            .collect();
+        let (pairs, _) = bytes.as_chunks::<2>();
+        let samples: Vec<i16> = pairs.iter().map(|b| i16::from_le_bytes(*b)).collect();
         assert_eq!(samples[0], 0);
         assert_eq!(samples[1], 32767);
         // Out-of-range input clamps instead of wrapping.

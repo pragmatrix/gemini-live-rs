@@ -29,6 +29,9 @@ pub enum SetupAction {
     CreateNamedVoiceChannel(String),
 }
 
+// `serenity::Error` is an upstream type; boxing it on this cold setup path
+// would only push unwrapping onto every caller.
+#[allow(clippy::result_large_err)]
 pub async fn ensure_target_voice_channel(
     http: &Arc<Http>,
     guild_id: GuildId,
