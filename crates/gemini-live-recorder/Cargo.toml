@@ -1,6 +1,6 @@
 [package]
 name = "gemini-live-recorder"
-version = "0.1.8"
+version = "0.1.9"
 description = "Experimental continuous desktop activity recorder built on Gemini Live"
 readme = "../../README.md"
 edition.workspace = true

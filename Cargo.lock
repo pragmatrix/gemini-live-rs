@@ -1748,7 +1748,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-live"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "base64",
  "bytes",
@@ -1767,7 +1767,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-live-cli"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "bytes",
  "clap",
@@ -1792,7 +1792,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-live-discord"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "bytes",
  "gemini-live",
@@ -1812,7 +1812,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-live-harness"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "criterion",
  "futures-util",
@@ -1827,7 +1827,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-live-io"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "cpal",
  "image",
@@ -1840,7 +1840,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-live-recorder"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "chrono",
  "clap",
@@ -1858,7 +1858,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-live-runtime"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "base64",
  "bytes",
@@ -1872,7 +1872,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-live-tools"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "futures-util",
  "gemini-live",
