@@ -113,6 +113,9 @@ struct PersistedProfileInput {
     speak_enabled: bool,
     #[cfg(feature = "share-screen")]
     screen_share: profile::ScreenShareProfile,
+    /// Transcribe-mode settings pass through untouched — chat startup must
+    /// not wipe them when rebuilding the persisted profile.
+    transcribe: Option<profile::TranscribeProfile>,
 }
 
 impl StartupConfig {
@@ -129,7 +132,7 @@ impl StartupConfig {
 pub(crate) struct CliConfigError(String);
 
 impl CliConfigError {
-    fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         Self(message.into())
     }
 }
@@ -184,6 +187,7 @@ pub(crate) fn resolve_startup_config(
             speak_enabled,
             #[cfg(feature = "share-screen")]
             screen_share: screen_share.clone(),
+            transcribe: stored_profile.transcribe.clone(),
         },
         &transport,
     );
@@ -238,8 +242,8 @@ pub(crate) fn build_cli_setup_with_tools(
             ..Default::default()
         }),
         system_instruction: system_instruction.map(system_instruction_content),
-        input_audio_transcription: Some(AudioTranscriptionConfig {}),
-        output_audio_transcription: Some(AudioTranscriptionConfig {}),
+        input_audio_transcription: Some(AudioTranscriptionConfig::default()),
+        output_audio_transcription: Some(AudioTranscriptionConfig::default()),
         session_resumption: Some(SessionResumptionConfig::default()),
         tools,
         ..Default::default()
@@ -433,6 +437,7 @@ fn build_persisted_profile(
         screen_share: Some(input.screen_share.clone()),
         #[cfg(not(feature = "share-screen"))]
         screen_share: None,
+        transcribe: input.transcribe.clone(),
     }
 }
 
@@ -503,6 +508,26 @@ mod tests {
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect::<HashMap<_, _>>();
         move |key| vars.get(key).cloned()
+    }
+
+    #[test]
+    fn chat_startup_preserves_transcribe_profile_section() {
+        let stored = profile::ProfileConfig {
+            transcribe: Some(profile::TranscribeProfile {
+                model: Some("models/gemini-3.5-transcribe-live".into()),
+                custom_vocabulary: Some(vec!["serde".into()]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let startup =
+            resolve_startup_config(env(&[("GEMINI_API_KEY", "test-key")]), &stored, "default")
+                .expect("startup config");
+
+        // The chat write-back rebuilds the profile from scratch; the
+        // transcribe section must survive that round trip.
+        assert_eq!(startup.persisted_profile.transcribe, stored.transcribe);
     }
 
     #[test]

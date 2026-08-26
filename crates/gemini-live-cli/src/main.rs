@@ -33,6 +33,7 @@
 //! - startup/profile resolution and the default session template: `startup.rs`
 //! - desktop media host wiring: `desktop.rs`
 //! - TUI rendering and terminal lifecycle: `render.rs`
+//! - the `transcribe` subcommand (real-time speech-to-text): `transcribe/`
 
 mod app;
 mod desktop;
@@ -46,6 +47,8 @@ mod session;
 mod slash;
 mod startup;
 mod tooling;
+#[cfg(feature = "transcribe")]
+mod transcribe;
 mod update;
 
 use std::io;
@@ -84,6 +87,9 @@ struct CliArgs {
 enum CliCommand {
     Update,
     Config,
+    /// Real-time speech-to-text TUI (Live Transcribe API).
+    #[cfg(feature = "transcribe")]
+    Transcribe(transcribe::TranscribeArgs),
 }
 
 enum KeyAction {
@@ -103,6 +109,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             return Ok(());
         }
+        // Transcribe needs tracing + profile setup first; handled below.
+        #[cfg(feature = "transcribe")]
+        Some(CliCommand::Transcribe(_)) => {}
         None => {}
     }
 
@@ -114,6 +123,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let mut profile_store = profile::ProfileStore::load(cli.profile.as_deref())?;
+
+    #[cfg(feature = "transcribe")]
+    if let Some(CliCommand::Transcribe(args)) = &cli.command {
+        return transcribe::run_command(args, profile_store).await;
+    }
+
     let startup = resolve_startup_config(
         |key| std::env::var(key).ok(),
         profile_store.active_profile(),

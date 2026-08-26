@@ -57,6 +57,10 @@ pub struct ServerContent {
     #[serde(default)]
     pub interrupted: Option<bool>,
     pub input_transcription: Option<Transcription>,
+    /// Speculative partial input transcription (Live Transcribe models).
+    /// Each update supersedes the previous interim text; finalized text
+    /// arrives via `input_transcription`.
+    pub interim_input_transcription: Option<Transcription>,
     pub output_transcription: Option<Transcription>,
     /// Grounding metadata (schema may evolve — kept as opaque JSON).
     pub grounding_metadata: Option<serde_json::Value>,
@@ -247,6 +251,15 @@ pub enum ServerEvent {
 
     /// Transcription of the user's spoken input.
     InputTranscription(String),
+    /// Segment boundary marker: the server sent `inputTranscription` with
+    /// `finished = true`. Consumers that assemble transcript lines should
+    /// flush the current line when this fires. (Output transcriptions carry
+    /// the same wire flag, but no event surfaces it yet.)
+    InputTranscriptionFinished,
+    /// Speculative partial transcription of the user's spoken input
+    /// (Live Transcribe models). Replaces any prior interim text and is
+    /// superseded by `InputTranscription` once finalized.
+    InterimInputTranscription(String),
     /// Transcription of the model's spoken output.
     OutputTranscription(String),
 

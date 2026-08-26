@@ -941,6 +941,8 @@ async fn handle_server_event(
                 reply_state.append_input_transcription(&text);
             }
         }
+        ServerEvent::InputTranscriptionFinished => {}
+        ServerEvent::InterimInputTranscription(_) => {}
         ServerEvent::GenerationComplete => {}
         ServerEvent::SetupComplete => {}
         ServerEvent::ToolCall(_) => {}

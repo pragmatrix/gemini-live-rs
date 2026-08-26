@@ -15,6 +15,7 @@
 |---|---|
 | **WebSockets API reference (primary)** | https://ai.google.dev/api/live |
 | **Live API guide / quickstart** | https://ai.google.dev/api/multimodal-live |
+| **Live Transcribe guide** | https://ai.google.dev/gemini-api/docs/live-api/live-transcribe |
 | **Capabilities guide** | https://ai.google.dev/gemini-api/docs/live-guide |
 | **Tool use guide** | https://ai.google.dev/gemini-api/docs/live-tools |
 | **Session management** | https://ai.google.dev/gemini-api/docs/live-session |
@@ -40,6 +41,11 @@ wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.
 wss://{location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent
 Authorization: Bearer {TOKEN}
 ```
+
+Live Transcribe models (e.g. `gemini-3.5-transcribe-live`) use the same
+standard endpoint; they cap continuous streaming at 10 minutes per session.
+Setup-field and event semantics live on `AudioTranscriptionConfig` and the
+`ServerEvent` transcription variants in the source.
 
 ---
 

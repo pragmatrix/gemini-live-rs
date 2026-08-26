@@ -8,10 +8,11 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["mic", "speak", "share-screen"]
+default = ["mic", "speak", "share-screen", "transcribe"]
 mic = ["gemini-live-io/mic", "gemini-live-io/aec"]
 speak = ["gemini-live-io/speaker", "gemini-live-io/aec"]
 share-screen = ["gemini-live-io/screen"]
+transcribe = ["gemini-live-io/mic", "gemini-live-io/aec", "gemini-live-io/system-audio"]
 vertex-auth = ["gemini-live/vertex-auth"]
 
 [dependencies]

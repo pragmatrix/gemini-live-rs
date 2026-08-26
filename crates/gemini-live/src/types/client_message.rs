@@ -24,6 +24,10 @@ use super::config::*;
 /// Serde's externally-tagged enum representation satisfies this constraint
 /// directly — `ClientMessage::Setup(cfg)` serialises to `{"setup": { ... }}`.
 #[derive(Debug, Clone, Serialize)]
+// `Setup` dwarfs the other variants, but it is built exactly once per
+// handshake and never travels the send hot path — boxing it would only add
+// indirection for every construction site.
+#[allow(clippy::large_enum_variant)]
 pub enum ClientMessage {
     #[serde(rename = "setup")]
     Setup(SetupConfig),
@@ -71,7 +75,9 @@ pub struct SetupConfig {
     /// Server-managed context compression settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window_compression: Option<ContextWindowCompressionConfig>,
-    /// Presence-activated input speech transcription (`{}` to enable).
+    /// Presence-activated input speech transcription (`Some(default)` = `{}`
+    /// to enable). Live Transcribe models additionally honour the inner
+    /// language/vocabulary/mode fields.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_audio_transcription: Option<AudioTranscriptionConfig>,
     /// Presence-activated output speech transcription (`{}` to enable).

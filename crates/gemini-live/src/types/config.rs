@@ -287,9 +287,92 @@ pub struct SlidingWindow {
 /// for the corresponding direction (input or output).
 ///
 /// The server treats the field's presence as the signal; callers should send
-/// `Some(AudioTranscriptionConfig {})`, not a boolean.
+/// `Some(AudioTranscriptionConfig::default())`, not a boolean.
+///
+/// The inner fields are honoured only by Live Transcribe models (e.g.
+/// `models/gemini-3.5-transcribe-live`); regular Live models treat this as a
+/// bare presence marker and ignore them.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct AudioTranscriptionConfig {}
+#[serde(rename_all = "camelCase")]
+pub struct AudioTranscriptionConfig {
+    /// BCP-47 language codes to transcribe (e.g. `["en-US", "zh-TW"]`).
+    /// Omitted or empty enables automatic language detection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_codes: Option<Vec<String>>,
+    /// Recognition-bias terms, up to 1,000 (≈100 is the documented sweet
+    /// spot). Live Transcribe only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_vocabulary: Option<Vec<String>>,
+    /// Transcript style; the server defaults to `VERBATIM` when omitted.
+    /// Live Transcribe only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<TranscriptionMode>,
+}
+
+/// How a Live Transcribe model renders the transcript.
+///
+/// `Smart` is incompatible with word-level annotations upstream; it removes
+/// disfluencies and applies structured formatting (lists, punctuation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TranscriptionMode {
+    /// Literal transcript of what was said (server default).
+    Verbatim,
+    /// Cleaned-up transcript: disfluency removal and formatting polish.
+    Smart,
+}
+
+impl TranscriptionMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Verbatim => "verbatim",
+            Self::Smart => "smart",
+        }
+    }
+}
+
+impl fmt::Display for TranscriptionMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseTranscriptionModeError {
+    raw: String,
+}
+
+impl ParseTranscriptionModeError {
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+}
+
+impl fmt::Display for ParseTranscriptionModeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "unsupported transcription mode {:?}; expected one of: verbatim, smart",
+            self.raw
+        )
+    }
+}
+
+impl std::error::Error for ParseTranscriptionModeError {}
+
+impl FromStr for TranscriptionMode {
+    type Err = ParseTranscriptionModeError;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "verbatim" => Ok(Self::Verbatim),
+            "smart" => Ok(Self::Smart),
+            _ => Err(ParseTranscriptionModeError {
+                raw: raw.to_string(),
+            }),
+        }
+    }
+}
 
 // ── Proactivity (v1alpha, Gemini 2.5) ────────────────────────────────────────
 
@@ -389,4 +472,31 @@ pub enum FunctionScheduling {
 pub enum FunctionBehavior {
     /// Model continues generating while awaiting the response.
     NonBlocking,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcription_mode_from_str_round_trip() {
+        for mode in [TranscriptionMode::Verbatim, TranscriptionMode::Smart] {
+            assert_eq!(mode.as_str().parse::<TranscriptionMode>().unwrap(), mode);
+        }
+        // Case-insensitive, whitespace-tolerant.
+        assert_eq!(
+            " SMART ".parse::<TranscriptionMode>().unwrap(),
+            TranscriptionMode::Smart
+        );
+        assert_eq!(
+            "Verbatim".parse::<TranscriptionMode>().unwrap(),
+            TranscriptionMode::Verbatim
+        );
+    }
+
+    #[test]
+    fn transcription_mode_from_str_rejects_unknown() {
+        let err = "polished".parse::<TranscriptionMode>().unwrap_err();
+        assert_eq!(err.raw(), "polished");
+    }
 }

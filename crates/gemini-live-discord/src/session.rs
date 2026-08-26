@@ -67,8 +67,8 @@ fn build_live_setup_with_tools(config: &DiscordBotConfig, tools: Option<Vec<Tool
         }),
         system_instruction: Some(discord_system_instruction(&config.system_instruction)),
         tools,
-        input_audio_transcription: Some(AudioTranscriptionConfig {}),
-        output_audio_transcription: Some(AudioTranscriptionConfig {}),
+        input_audio_transcription: Some(AudioTranscriptionConfig::default()),
+        output_audio_transcription: Some(AudioTranscriptionConfig::default()),
         session_resumption: Some(SessionResumptionConfig::default()),
         context_window_compression: Some(ContextWindowCompressionConfig {
             sliding_window: Some(SlidingWindow::default()),

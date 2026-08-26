@@ -1,6 +1,6 @@
 # Testing Strategy
 
-> Test coverage tracking. Planned tests are tracked in [`roadmap.md`](roadmap.md) items **T-1** through **T-8**.
+> Test coverage tracking. Planned tests are tracked in [`roadmap.md`](roadmap.md) items **T-1** through **T-9**.
 
 ---
 
@@ -10,9 +10,10 @@ Current checked-in coverage is organized by crate and behavior surface rather
 than by a brittle per-topic count snapshot:
 
 - `gemini-live`
-  codec round-trips, event decomposition, audio encoding, session status and
-  resumed-handshake shaping, transport request construction, and wire-level
-  hot-path benchmarks.
+  codec round-trips (including Live Transcribe setup fields and
+  interim/finished input-transcription decomposition), event decomposition,
+  audio encoding, session status and resumed-handshake shaping, transport
+  request construction, and wire-level hot-path benchmarks.
 - `gemini-live-runtime`
   staged setup patching, resumed vs fresh apply semantics, managed runtime
   forwarding, generation filtering, process-local memory, hot/dormant
@@ -25,13 +26,18 @@ than by a brittle per-topic count snapshot:
   regression, and passive-notification durability benchmarks.
 - `gemini-live-cli`
   startup/profile resolution, CLI argument parsing, slash-command parsing and
-  completion, reducer behavior, render status, outbound send ordering, and tool
-  catalog/runtime composition.
+  completion, reducer behavior, render status, outbound send ordering, tool
+  catalog/runtime composition, and transcribe mode (settings resolution,
+  setup shaping, slash grammar/completion sync, line-assembly reducer, and
+  transcribe-profile write-back preservation).
 - `gemini-live-discord`
   config parsing, routing policy, target-channel planning, runtime bootstrap,
   service helper behavior, and current text/voice projection semantics.
 - `gemini-live-io`
-  desktop audio resample helpers.
+  desktop audio resample helpers and shared PCM chunking/encoding helpers.
+- `gemini-live-recorder`
+  recorder CLI argument validation, tool-argument validation, setup shaping,
+  and append-only JSONL storage semantics.
 - Doc tests
   `gemini-live` crate docs, including the `lib.rs` usage example and
   `AudioEncoder` examples.

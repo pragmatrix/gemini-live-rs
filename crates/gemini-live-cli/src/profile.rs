@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use gemini_live::types::ThinkingLevel;
+use gemini_live::types::{ThinkingLevel, TranscriptionMode};
 use gemini_live_harness::{Harness, HarnessProfileStore};
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,35 @@ pub struct ScreenShareProfile {
     pub interval_secs: Option<f64>,
 }
 
+/// Persisted transcription source selection for transcribe mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TranscribeSource {
+    Mic,
+    System,
+}
+
+/// Persisted settings for `gemini-live transcribe`.
+///
+/// All fields are optional overlays over the built-in transcribe defaults;
+/// they are written back when the user applies settings inside the TUI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscribeProfile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<TranscriptionMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_codes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_vocabulary: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatic_activity_detection: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<TranscribeSource>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileConfig {
@@ -66,6 +95,8 @@ pub struct ProfileConfig {
     pub speak_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub screen_share: Option<ScreenShareProfile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcribe: Option<TranscribeProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -148,6 +179,20 @@ impl ProfileStore {
                 let profile = config.profiles.entry(active_profile).or_default();
                 profile.mic_enabled = Some(mic_enabled);
                 profile.speak_enabled = Some(speak_enabled);
+            })
+            .map_err(into_io_error)
+    }
+
+    #[cfg(feature = "transcribe")]
+    pub fn set_transcribe_profile(&mut self, transcribe: TranscribeProfile) -> io::Result<()> {
+        let active_profile = self.inner.active_profile_name().to_string();
+        self.inner
+            .update_active_profile(|config: &mut CliProfileConfig| {
+                config
+                    .profiles
+                    .entry(active_profile)
+                    .or_default()
+                    .transcribe = Some(transcribe);
             })
             .map_err(into_io_error)
     }

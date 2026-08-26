@@ -23,6 +23,7 @@ structural inefficiency is still unresolved.
 | P-6 | Desktop audio callback allocations | 2026-04-12 | Reworked `gemini-live-io` mic/speaker adapters around reusable scratch buffers and in-place resampling, eliminating steady-state callback allocations on the speaker path and removing most transient mic callback heap traffic. |
 | P-4 | `ServerEvent::ModelAudio` clone cost | 2026-04-12 | Switched model-audio events to `bytes::Bytes`, so runtime fanout now clones payload handles instead of copying PCM buffers. |
 | F-10 | Harness host lifecycle parity | 2026-04-12 | The CLI now uses `SessionManager` like Discord does, so wake / resume / dormant transitions and passive-notification wake semantics no longer depend on a permanently hot desktop session. |
+| F-11 | Live Transcribe support + `gemini-live transcribe` TUI | 2026-08-27 | Core types cover `inputAudioTranscription` fields (`languageCodes`, `customVocabulary`, `mode`), `interimInputTranscription`, and the `finished` boundary marker. The CLI gained a transcribe mode (16 kHz mic/system-audio sources, staged settings via slash commands, `--output` line appends) built on the bare core `Session`. |
 
 ## Features
 
@@ -49,6 +50,7 @@ end-user application.
 | ID | Item | Description | Priority |
 |----|------|-------------|----------|
 | C-1 | Richer session profiles | Persistent named profiles now cover backend, model, system instruction, credentials, tools, and device auto-start state. Extend them to first-class voice and richer session-template controls. | High |
+| C-2 | Proactive transcribe session rotation | Transcribe sessions hit the upstream 10-minute streaming cap mid-word; the reconnect is automatic but lossy at the boundary. Rotate proactively (~9:30) during a silence gap to avoid cutting a word. | Low |
 | C-4 | Distribution truthfulness | `update.rs` advertises Linux ARM64, but the release workflow does not ship that artifact. Align updater targets with published binaries. | Medium |
 | C-5 | Profile management surface | Harness-managed named profiles now back CLI and Discord state, but there is still no explicit host-facing surface for listing, renaming, deleting, or copying profiles. Add that only after notification metadata and host lifecycle semantics are in better shape, so we do not widen the product surface before the underlying recovery model is solid. | Low |
 
@@ -66,6 +68,7 @@ Planned tests not yet implemented.
 | T-6 | Stress: reconnection stability | Unstable network simulation → verify no events are dropped across reconnections. | Low |
 | T-7 | CLI parser / reducer / tool-runtime tests | Slash parser/completion coverage, startup/render tests, tool-catalog tests, app-reducer tests, outbound send tests, and managed-runtime tests now exist. Expand coverage to staged-profile apply flow and richer local tool execution boundaries. | High |
 | T-8 | Discord host tests | The Discord crate now covers config parsing, routing policy, target-channel planning, runtime bootstrap, service helper behavior, and the current text/voice reply projection semantics. Add higher-level tests for guild setup execution against mocked Discord HTTP, runtime event projection, and Songbird bridge lifecycle. | High |
+| T-9 | Integration: Live Transcribe session | Real-API test for the transcribe path: stream 16 kHz PCM → receive `interimInputTranscription` / `inputTranscription` + `finished`, verifying the fragment/segment semantics the CLI line assembly assumes. | Medium |
 
 ## Tech Debt
 

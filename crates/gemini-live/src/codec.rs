@@ -113,7 +113,9 @@ pub fn decode(json: &str) -> Result<ServerMessage, CodecError> {
 /// The event ordering follows a natural "content first, metadata last"
 /// convention:
 /// 1. `SetupComplete`
-/// 2. Transcriptions (input, then output)
+/// 2. Transcriptions (finalized input, its `finished` marker, interim input,
+///    then output) — finalized-before-interim lets consumers append the
+///    finalized text and then replace their interim buffer in one pass
 /// 3. Model content (text / audio parts in wire order)
 /// 4. Flags (`Interrupted`, `GenerationComplete`, `TurnComplete`)
 /// 5. Tool calls / cancellations
@@ -130,10 +132,18 @@ pub fn into_events(msg: ServerMessage) -> Vec<ServerEvent> {
 
     // 2–4. Server content
     if let Some(sc) = msg.server_content {
-        if let Some(t) = sc.input_transcription
+        if let Some(t) = sc.input_transcription {
+            if let Some(text) = t.text {
+                events.push(ServerEvent::InputTranscription(text));
+            }
+            if t.finished == Some(true) {
+                events.push(ServerEvent::InputTranscriptionFinished);
+            }
+        }
+        if let Some(t) = sc.interim_input_transcription
             && let Some(text) = t.text
         {
-            events.push(ServerEvent::InputTranscription(text));
+            events.push(ServerEvent::InterimInputTranscription(text));
         }
         if let Some(t) = sc.output_transcription
             && let Some(text) = t.text
@@ -306,8 +316,8 @@ mod tests {
                     inline_data: None,
                 }],
             }),
-            input_audio_transcription: Some(AudioTranscriptionConfig {}),
-            output_audio_transcription: Some(AudioTranscriptionConfig {}),
+            input_audio_transcription: Some(AudioTranscriptionConfig::default()),
+            output_audio_transcription: Some(AudioTranscriptionConfig::default()),
             session_resumption: Some(SessionResumptionConfig { handle: None }),
             context_window_compression: Some(ContextWindowCompressionConfig {
                 sliding_window: Some(SlidingWindow::default()),
@@ -339,6 +349,45 @@ mod tests {
             setup["contextWindowCompression"],
             serde_json::json!({ "slidingWindow": {} })
         );
+    }
+
+    #[test]
+    fn encode_setup_transcribe_input_config() {
+        let msg = ClientMessage::Setup(SetupConfig {
+            model: "models/gemini-3.5-transcribe-live".into(),
+            generation_config: Some(GenerationConfig {
+                response_modalities: Some(vec![Modality::Text]),
+                ..Default::default()
+            }),
+            input_audio_transcription: Some(AudioTranscriptionConfig {
+                language_codes: Some(vec!["en-US".into(), "zh-TW".into()]),
+                custom_vocabulary: Some(vec!["Kubernetes".into(), "serde".into()]),
+                mode: Some(TranscriptionMode::Smart),
+            }),
+            ..Default::default()
+        });
+        let json = encode(&msg).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let setup = &v["setup"];
+        assert_eq!(setup["generationConfig"]["responseModalities"][0], "TEXT");
+        let transcription = &setup["inputAudioTranscription"];
+        assert_eq!(transcription["languageCodes"][0], "en-US");
+        assert_eq!(transcription["languageCodes"][1], "zh-TW");
+        assert_eq!(transcription["customVocabulary"][0], "Kubernetes");
+        assert_eq!(transcription["mode"], "SMART");
+    }
+
+    #[test]
+    fn encode_setup_default_transcription_config_is_empty_object() {
+        let msg = ClientMessage::Setup(SetupConfig {
+            model: "models/gemini-3.1-flash-live-preview".into(),
+            input_audio_transcription: Some(AudioTranscriptionConfig::default()),
+            ..Default::default()
+        });
+        let json = encode(&msg).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // The presence-marker contract: `default()` must stay exactly `{}`.
+        assert_eq!(v["setup"]["inputAudioTranscription"], serde_json::json!({}));
     }
 
     #[test]
@@ -482,6 +531,26 @@ mod tests {
         assert_eq!(
             sc.output_transcription.unwrap().text.as_deref(),
             Some("It's sunny today.")
+        );
+    }
+
+    #[test]
+    fn decode_server_content_with_interim_input_transcription() {
+        let json = r#"{
+            "serverContent": {
+                "interimInputTranscription": {"text": "what's the wea"},
+                "inputTranscription": {"text": "What's the weather?"}
+            }
+        }"#;
+        let msg = decode(json).unwrap();
+        let sc = msg.server_content.unwrap();
+        assert_eq!(
+            sc.interim_input_transcription.unwrap().text.as_deref(),
+            Some("what's the wea")
+        );
+        assert_eq!(
+            sc.input_transcription.unwrap().text.as_deref(),
+            Some("What's the weather?")
         );
     }
 
@@ -690,6 +759,61 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert!(matches!(&events[0], ServerEvent::TurnComplete));
+    }
+
+    #[test]
+    fn into_events_interim_input_transcription() {
+        let json = r#"{
+            "serverContent": {
+                "interimInputTranscription": {"text": "hel"}
+            }
+        }"#;
+        let events = into_events(decode(json).unwrap());
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], ServerEvent::InterimInputTranscription(t) if t == "hel"));
+    }
+
+    #[test]
+    fn into_events_final_before_interim_in_combined_message() {
+        let json = r#"{
+            "serverContent": {
+                "interimInputTranscription": {"text": "next par"},
+                "inputTranscription": {"text": "Hello there."}
+            }
+        }"#;
+        let events = into_events(decode(json).unwrap());
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], ServerEvent::InputTranscription(t) if t == "Hello there."));
+        assert!(matches!(&events[1], ServerEvent::InterimInputTranscription(t) if t == "next par"));
+    }
+
+    #[test]
+    fn into_events_input_transcription_finished_marker() {
+        let json = r#"{
+            "serverContent": {
+                "inputTranscription": {"text": "done", "finished": true}
+            }
+        }"#;
+        let events = into_events(decode(json).unwrap());
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], ServerEvent::InputTranscription(t) if t == "done"));
+        assert!(matches!(
+            &events[1],
+            ServerEvent::InputTranscriptionFinished
+        ));
+
+        // A finished marker with no text still yields the boundary event.
+        let json = r#"{
+            "serverContent": {
+                "inputTranscription": {"finished": true}
+            }
+        }"#;
+        let events = into_events(decode(json).unwrap());
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            ServerEvent::InputTranscriptionFinished
+        ));
     }
 
     // ── parse_protobuf_duration ──────────────────────────────────────────

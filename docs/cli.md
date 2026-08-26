@@ -47,6 +47,45 @@ Print the resolved config file path:
 cargo run -p gemini-live-cli -- config
 ```
 
+## Transcribe Mode
+
+`gemini-live transcribe` opens a dedicated real-time speech-to-text TUI
+backed by the Live Transcribe API (default model
+`models/gemini-3.5-transcribe-live`, override with `--model` or
+`GEMINI_TRANSCRIBE_MODEL`):
+
+```bash
+GEMINI_API_KEY=your-key gemini-live transcribe -o notes.txt
+```
+
+Interim hypotheses render in gray italics and are replaced by finalized
+transcript lines; with `--output`/`-o`, each finalized line is appended to
+the file as it lands (`tail -f` friendly). Flags: `--lang`, `--mode
+verbatim|smart`, `--vocab`, `--manual-vad`, `--source mic|system`.
+
+| Command | Action |
+|---------|--------|
+| `/mode [verbatim\|smart]` | Show or stage the transcript style. |
+| `/lang [codes…\|clear]` | Show or stage BCP-47 language codes (`clear` = auto-detect). |
+| `/vocab [list\|add <terms…>\|remove <term>\|clear]` | Inspect or stage custom vocabulary (≤1000 terms). |
+| `/vad [on\|off]` | Show or stage automatic activity detection. |
+| `/apply` | Reconnect with the staged settings (settings are setup-level); also serves as a manual reconnect. |
+| `/source [mic\|system]` | Show or switch the audio source immediately (no reconnect). |
+| `/start` / `/end` | Mark speech segments manually (only when VAD is off). |
+| `/clear` | Clear the transcript pane; the output file is untouched. |
+
+Both sources stream 16 kHz mono PCM in 100 ms chunks: `mic` runs the default
+input device through the shared AEC pipeline, `system` captures the default
+output device via backend loopback. macOS CoreAudio has no native loopback,
+so `system` there requires a virtual output device (e.g. BlackHole); the
+failure surfaces as a notice and the mic stays active. Sessions are capped at
+10 minutes of continuous streaming upstream; the CLI reconnects automatically
+and shows the elapsed time in the status bar.
+
+Applied settings persist into the `transcribe` section of the active profile.
+Canonical behavior lives in the module docs of
+`crates/gemini-live-cli/src/transcribe/mod.rs` and `transcribe/startup.rs`.
+
 ## Profiles & Config
 
 The harness now owns the filesystem-level profile mechanism. Each CLI profile
@@ -172,6 +211,7 @@ Each slash command group is a separate Cargo feature, all enabled by default:
 | `mic` | `gemini-live-io/mic`, `gemini-live-io/aec` | `/mic` command with AEC-backed microphone capture |
 | `speak` | `gemini-live-io/speaker`, `gemini-live-io/aec` | `/speak` command with AEC-backed speaker playback |
 | `share-screen` | `gemini-live-io/screen` | `/share-screen` command |
+| `transcribe` | `gemini-live-io/mic`, `gemini-live-io/aec`, `gemini-live-io/system-audio` | `gemini-live transcribe` subcommand (mic + system-audio sources) |
 | `vertex-auth` | `gemini-live/vertex-auth` | `VERTEX_AUTH=adc` via Google Cloud Application Default Credentials |
 
 Build without audio/screen support for a minimal binary:
@@ -191,6 +231,7 @@ desktop.rs               CLI host wiring above `gemini-live-io`
 render.rs                Terminal lifecycle + TUI rendering
 input.rs                 Single-line editor wrapper built on `tui-textarea`
 slash.rs                 Structured slash-command parsing (`clap`) + completion model
+transcribe/              `gemini-live transcribe` mode: startup, state, render, slash, audio
 media.rs                 @file loading: image/audio detection, WAV decoding, mono mixdown
 outbound.rs              User-input/media send ordering above `RuntimeSession`
 tooling.rs               CLI-local tool profile + host-fed ToolProvider/ToolExecutor composition
