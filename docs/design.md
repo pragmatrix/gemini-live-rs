@@ -40,7 +40,7 @@ catch future regressions instead of assuming the current state will hold.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│              Host Applications (`cli` / `discord`)           │
+│      Host Applications (`cli` / `discord` / `recorder`)      │
 ├──────────────────────────────────────────────────────────────┤
 │  Host-Specific Adapters                                      │
 │  `gemini-live-io` for desktop hosts; Discord gateway/voice   │

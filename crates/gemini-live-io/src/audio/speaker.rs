@@ -61,7 +61,7 @@ impl SpeakerPlayback {
         let supported = device
             .default_output_config()
             .map_err(|e| AudioIoError::DefaultOutputConfig(e.to_string()))?;
-        let device_sample_rate = supported.sample_rate().0;
+        let device_sample_rate = supported.sample_rate();
         let channels = supported.channels() as usize;
         let config: StreamConfig = supported.config();
 

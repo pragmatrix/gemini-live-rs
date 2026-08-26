@@ -7,13 +7,16 @@ use tokio::sync::mpsc;
 
 use crate::error::ScreenCaptureError;
 
-use super::target::{CaptureHandle, CaptureTarget, resolve_target};
+use super::target::{CaptureHandle, CaptureTarget, CaptureTargetKind, resolve_target};
 
 const JPEG_MIME_TYPE: &str = "image/jpeg";
 
 /// A single encoded screen-capture frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncodedFrame {
+    pub target_id: usize,
+    pub target_name: String,
+    pub target_kind: CaptureTargetKind,
     pub bytes: Vec<u8>,
     pub mime_type: &'static str,
 }
@@ -63,11 +66,12 @@ impl ScreenCapture {
 
         let resolved = resolve_target(target_id)?;
         let target = resolved.metadata.clone();
+        let worker_target = target.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
 
         std::thread::spawn(move || {
-            capture_loop(resolved.handle, config, tx, worker_stop);
+            capture_loop(worker_target, resolved.handle, config, tx, worker_stop);
         });
 
         Ok(Self { stop, target })
@@ -81,6 +85,7 @@ impl Drop for ScreenCapture {
 }
 
 fn capture_loop(
+    target_info: CaptureTarget,
     target: CaptureHandle,
     config: ScreenCaptureConfig,
     tx: mpsc::Sender<EncodedFrame>,
@@ -91,6 +96,9 @@ fn capture_loop(
             Ok(bytes) => {
                 if tx
                     .blocking_send(EncodedFrame {
+                        target_id: target_info.id,
+                        target_name: target_info.name.clone(),
+                        target_kind: target_info.kind,
                         bytes,
                         mime_type: JPEG_MIME_TYPE,
                     })

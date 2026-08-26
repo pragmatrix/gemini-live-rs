@@ -18,3 +18,7 @@ target/
 
 .env
 .DS_Store
+
+# Local run artifacts
+activity-log.jsonl
+tmp-out.txt

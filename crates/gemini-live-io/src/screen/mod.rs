@@ -7,4 +7,4 @@ mod capture;
 mod target;
 
 pub use capture::{EncodedFrame, ScreenCapture, ScreenCaptureConfig};
-pub use target::{CaptureTarget, CaptureTargetKind, list_targets};
+pub use target::{CaptureTarget, CaptureTargetKind, list_monitor_targets, list_targets};

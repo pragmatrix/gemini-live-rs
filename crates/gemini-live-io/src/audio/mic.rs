@@ -1,19 +1,53 @@
+use std::collections::VecDeque;
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
 use tokio::sync::mpsc;
 
 use crate::error::AudioIoError;
 
+use super::CapturedAudio;
 use super::aec::{AEC_FRAME_SIZE, AEC_SAMPLE_RATE, AecHandle};
+use super::pcm::{decode_i16_to_f32_into, drain_chunks, encode_f32_to_pcm_i16le};
 use super::resample::linear_resample_into;
 
-/// Echo-cancelled mono PCM chunk captured from the default microphone.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CapturedAudio {
-    /// i16 little-endian PCM payload suitable for `send_audio_at_rate`.
-    pub pcm_i16_le: Vec<u8>,
-    /// Sample rate of `pcm_i16_le`.
-    pub sample_rate: u32,
+/// Output shaping for [`MicCapture`].
+///
+/// AEC always runs at [`AEC_SAMPLE_RATE`] internally (echo cancellation needs
+/// the same clock as the speaker render path). When `output_sample_rate`
+/// differs, the cleaned audio is resampled after AEC and accumulated into
+/// `chunk_samples`-sized chunks before emission.
+#[derive(Debug, Clone, Copy)]
+pub struct MicCaptureConfig {
+    /// Sample rate of the emitted [`CapturedAudio`] chunks.
+    pub output_sample_rate: u32,
+    /// Samples per emitted chunk at `output_sample_rate`.
+    pub chunk_samples: usize,
+}
+
+impl Default for MicCaptureConfig {
+    /// Passthrough: one 10 ms frame per chunk at the AEC rate (48 kHz).
+    fn default() -> Self {
+        Self {
+            output_sample_rate: AEC_SAMPLE_RATE,
+            chunk_samples: AEC_FRAME_SIZE,
+        }
+    }
+}
+
+impl MicCaptureConfig {
+    /// 16 kHz mono in 100 ms chunks — the shape required by Live Transcribe
+    /// input audio, and identical to `SystemAudioCapture` output.
+    pub const fn transcribe() -> Self {
+        Self {
+            output_sample_rate: 16_000,
+            chunk_samples: 1_600,
+        }
+    }
+
+    fn is_aec_passthrough(&self) -> bool {
+        self.output_sample_rate == AEC_SAMPLE_RATE && self.chunk_samples == AEC_FRAME_SIZE
+    }
 }
 
 /// Active capture stream for the default input device.
@@ -21,7 +55,8 @@ pub struct MicCapture {
     _stream: cpal::Stream,
     /// Native sample rate reported by the capture device.
     pub input_sample_rate: u32,
-    /// Output sample rate after AEC processing.
+    /// Sample rate of emitted chunks after AEC processing (and optional
+    /// output resampling).
     pub output_sample_rate: u32,
 }
 
@@ -34,94 +69,60 @@ impl std::fmt::Debug for MicCapture {
     }
 }
 
+/// Reusable scratch buffers for the capture callback hot path.
 #[derive(Default)]
-struct MicCallbackState {
-    input_f32: Vec<f32>,
+struct MicBuffers {
     mono: Vec<f32>,
     resampled: Vec<f32>,
     aec_frame: Vec<f32>,
+    processed: Vec<f32>,
+    output_resampled: Vec<f32>,
+    pending: VecDeque<f32>,
+    chunk: Vec<f32>,
+}
+
+#[derive(Default)]
+struct MicCallbackState {
+    input_f32: Vec<f32>,
+    buffers: MicBuffers,
 }
 
 struct MicCallbackContext<'a> {
     channels: usize,
     input_sample_rate: u32,
+    config: MicCaptureConfig,
     aec: &'a AecHandle,
     tx: &'a mpsc::Sender<CapturedAudio>,
 }
 
 impl MicCallbackState {
-    fn process_f32(
-        &mut self,
-        data: &[f32],
-        channels: usize,
-        input_sample_rate: u32,
-        aec: &AecHandle,
-        tx: &mpsc::Sender<CapturedAudio>,
-    ) {
-        self.process_samples(
-            data,
-            MicCallbackContext {
-                channels,
-                input_sample_rate,
-                aec,
-                tx,
-            },
-        );
+    fn process_f32(&mut self, data: &[f32], ctx: MicCallbackContext<'_>) {
+        process_mic_samples(data, ctx, &mut self.buffers);
     }
 
-    fn process_i16(
-        &mut self,
-        data: &[i16],
-        channels: usize,
-        input_sample_rate: u32,
-        aec: &AecHandle,
-        tx: &mpsc::Sender<CapturedAudio>,
-    ) {
-        let Self {
-            input_f32,
-            mono,
-            resampled,
-            aec_frame,
-        } = self;
-        decode_i16_to_f32_into(input_f32, data);
-        process_mic_samples(
-            input_f32,
-            MicCallbackContext {
-                channels,
-                input_sample_rate,
-                aec,
-                tx,
-            },
-            mono,
-            resampled,
-            aec_frame,
-        );
-    }
-
-    fn process_samples(&mut self, data: &[f32], ctx: MicCallbackContext<'_>) {
-        let Self {
-            input_f32: _,
-            mono,
-            resampled,
-            aec_frame,
-        } = self;
-        process_mic_samples(data, ctx, mono, resampled, aec_frame);
+    fn process_i16(&mut self, data: &[i16], ctx: MicCallbackContext<'_>) {
+        decode_i16_to_f32_into(&mut self.input_f32, data);
+        process_mic_samples(&self.input_f32, ctx, &mut self.buffers);
     }
 }
 
-fn process_mic_samples(
-    data: &[f32],
-    ctx: MicCallbackContext<'_>,
-    mono: &mut Vec<f32>,
-    resampled: &mut Vec<f32>,
-    aec_frame: &mut Vec<f32>,
-) {
+fn process_mic_samples(data: &[f32], ctx: MicCallbackContext<'_>, buffers: &mut MicBuffers) {
     let MicCallbackContext {
         channels,
         input_sample_rate,
+        config,
         aec,
         tx,
     } = ctx;
+    let MicBuffers {
+        mono,
+        resampled,
+        aec_frame,
+        processed,
+        output_resampled,
+        pending,
+        chunk,
+    } = buffers;
 
     mono.resize(data.len() / channels, 0.0);
     for (slot, frame) in mono.iter_mut().zip(data.chunks_exact(channels)) {
@@ -139,13 +140,15 @@ fn process_mic_samples(
         resampled.as_slice()
     };
 
+    let passthrough = config.is_aec_passthrough();
     aec_frame.resize(AEC_FRAME_SIZE, 0.0);
-    for chunk in aec_input.chunks(AEC_FRAME_SIZE) {
-        if chunk.len() < AEC_FRAME_SIZE {
+    processed.clear();
+    for frame in aec_input.chunks(AEC_FRAME_SIZE) {
+        if frame.len() < AEC_FRAME_SIZE {
             break;
         }
 
-        aec_frame.copy_from_slice(chunk);
+        aec_frame.copy_from_slice(frame);
         if aec
             .processor()
             .process_capture_frame(&mut [&mut aec_frame[..]])
@@ -154,20 +157,56 @@ fn process_mic_samples(
             continue;
         }
 
-        let pcm_i16_le = encode_f32_to_pcm_i16le(aec_frame);
+        if passthrough {
+            tx.try_send(CapturedAudio {
+                pcm_i16_le: encode_f32_to_pcm_i16le(aec_frame),
+                sample_rate: AEC_SAMPLE_RATE,
+            })
+            .ok();
+        } else {
+            processed.extend_from_slice(aec_frame);
+        }
+    }
 
+    if passthrough || processed.is_empty() {
+        return;
+    }
+
+    let output = if config.output_sample_rate == AEC_SAMPLE_RATE {
+        processed.as_slice()
+    } else {
+        linear_resample_into(
+            output_resampled,
+            processed,
+            AEC_SAMPLE_RATE,
+            config.output_sample_rate,
+        );
+        output_resampled.as_slice()
+    };
+
+    pending.extend(output.iter().copied());
+    drain_chunks(pending, chunk, config.chunk_samples, |samples| {
         tx.try_send(CapturedAudio {
-            pcm_i16_le,
-            sample_rate: AEC_SAMPLE_RATE,
+            pcm_i16_le: encode_f32_to_pcm_i16le(samples),
+            sample_rate: config.output_sample_rate,
         })
         .ok();
-    }
+    });
 }
 
 impl MicCapture {
     /// Start capturing from the default input device and forward cleaned PCM
-    /// through `tx`.
+    /// through `tx` in the default shape (48 kHz, one 10 ms frame per chunk).
     pub fn start(tx: mpsc::Sender<CapturedAudio>, aec: AecHandle) -> Result<Self, AudioIoError> {
+        Self::start_with_config(tx, aec, MicCaptureConfig::default())
+    }
+
+    /// Start capturing with an explicit output shape.
+    pub fn start_with_config(
+        tx: mpsc::Sender<CapturedAudio>,
+        aec: AecHandle,
+        config: MicCaptureConfig,
+    ) -> Result<Self, AudioIoError> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
@@ -175,9 +214,9 @@ impl MicCapture {
         let supported = device
             .default_input_config()
             .map_err(|e| AudioIoError::DefaultInputConfig(e.to_string()))?;
-        let input_sample_rate = supported.sample_rate().0;
+        let input_sample_rate = supported.sample_rate();
         let channels = supported.channels() as usize;
-        let config: StreamConfig = supported.config();
+        let stream_config: StreamConfig = supported.config();
 
         let stream = match supported.sample_format() {
             SampleFormat::F32 => {
@@ -185,9 +224,18 @@ impl MicCapture {
                 let tx = tx.clone();
                 let mut callback_state = MicCallbackState::default();
                 device.build_input_stream(
-                    &config,
+                    &stream_config,
                     move |data: &[f32], _| {
-                        callback_state.process_f32(data, channels, input_sample_rate, &aec, &tx);
+                        callback_state.process_f32(
+                            data,
+                            MicCallbackContext {
+                                channels,
+                                input_sample_rate,
+                                config,
+                                aec: &aec,
+                                tx: &tx,
+                            },
+                        );
                     },
                     |e| tracing::warn!("mic: {e}"),
                     None,
@@ -198,9 +246,18 @@ impl MicCapture {
                 let tx = tx.clone();
                 let mut callback_state = MicCallbackState::default();
                 device.build_input_stream(
-                    &config,
+                    &stream_config,
                     move |data: &[i16], _| {
-                        callback_state.process_i16(data, channels, input_sample_rate, &aec, &tx);
+                        callback_state.process_i16(
+                            data,
+                            MicCallbackContext {
+                                channels,
+                                input_sample_rate,
+                                config,
+                                aec: &aec,
+                                tx: &tx,
+                            },
+                        );
                     },
                     |e| tracing::warn!("mic: {e}"),
                     None,
@@ -219,23 +276,7 @@ impl MicCapture {
         Ok(Self {
             _stream: stream,
             input_sample_rate,
-            output_sample_rate: AEC_SAMPLE_RATE,
+            output_sample_rate: config.output_sample_rate,
         })
     }
-}
-
-fn decode_i16_to_f32_into(output: &mut Vec<f32>, data: &[i16]) {
-    output.resize(data.len(), 0.0);
-    for (slot, &sample) in output.iter_mut().zip(data) {
-        *slot = sample as f32 / 32768.0;
-    }
-}
-
-fn encode_f32_to_pcm_i16le(samples: &[f32]) -> Vec<u8> {
-    let mut pcm_i16_le = Vec::with_capacity(samples.len() * std::mem::size_of::<i16>());
-    for &sample in samples {
-        let normalized = (sample * 32767.0).clamp(-32768.0, 32767.0) as i16;
-        pcm_i16_le.extend_from_slice(&normalized.to_le_bytes());
-    }
-    pcm_i16_le
 }

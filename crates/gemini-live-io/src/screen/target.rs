@@ -35,6 +35,14 @@ pub fn list_targets() -> Result<Vec<CaptureTarget>, ScreenCaptureError> {
         .collect())
 }
 
+pub fn list_monitor_targets() -> Result<Vec<CaptureTarget>, ScreenCaptureError> {
+    Ok(enumerate_targets()?
+        .into_iter()
+        .filter(|target| matches!(target.metadata.kind, CaptureTargetKind::Monitor))
+        .map(|target| target.metadata)
+        .collect())
+}
+
 pub(super) fn resolve_target(id: usize) -> Result<ResolvedCaptureTarget, ScreenCaptureError> {
     enumerate_targets()?
         .into_iter()

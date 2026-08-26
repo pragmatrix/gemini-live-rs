@@ -140,7 +140,7 @@ Each layer's public API and design notes are documented in source code doc comme
 
 ## Workspace Crates
 
-This repository now has seven focused crates instead of treating the CLI as the
+This repository now has eight focused crates instead of treating the CLI as the
 accidental home for reusable host logic:
 
 | Crate | Role |
@@ -150,6 +150,7 @@ accidental home for reusable host logic:
 | `gemini-live-harness` | Durable harness state, passive notifications, and shared host-tool execution policy |
 | `gemini-live-tools` | Reusable low-coupling tool families such as workspace inspection/execution |
 | `gemini-live-io` | Reusable desktop mic / speaker / screen adapters |
+| `gemini-live-recorder` | Experimental desktop screen-activity recorder that writes one structured JSONL record per observation window |
 | `gemini-live-cli` | Interactive desktop TUI built on the shared crates above |
 | `gemini-live-discord` | Single-guild Discord host for a shared text/voice Gemini Live agent |
 

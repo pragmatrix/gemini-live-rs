@@ -1,0 +1,24 @@
+[package]
+name = "gemini-live-recorder"
+version = "0.1.8"
+description = "Experimental continuous desktop activity recorder built on Gemini Live"
+readme = "../../README.md"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+gemini-live = { workspace = true }
+gemini-live-io = { workspace = true, features = ["screen", "system-audio"] }
+gemini-live-runtime = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { version = "4.6", features = ["derive"] }
+chrono = { version = "0.4", features = ["clock", "serde"] }
+
+[dev-dependencies]
+tempfile = "3.13"
