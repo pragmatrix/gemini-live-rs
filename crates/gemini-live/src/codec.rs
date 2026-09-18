@@ -17,7 +17,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::error::CodecError;
-use crate::types::{ClientMessage, ServerEvent, ServerMessage};
+use crate::types::{ClientMessage, InteractionStatus, ServerEvent, ServerMessage};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum RealtimeInputBlobKind {
@@ -168,8 +168,15 @@ pub fn into_events(msg: ServerMessage) -> Vec<ServerEvent> {
         if sc.generation_complete == Some(true) {
             events.push(ServerEvent::GenerationComplete);
         }
+        // Gemini 3.8 can complete the model turn while the interaction remains
+        // active; preserve that distinction as a semantic event.
         if sc.turn_complete == Some(true) {
-            events.push(ServerEvent::TurnComplete);
+            match sc.interaction_status {
+                Some(InteractionStatus::InProgress) => {
+                    events.push(ServerEvent::InteractionInProgress)
+                }
+                Some(InteractionStatus::Idle) | None => events.push(ServerEvent::TurnComplete),
+            }
         }
     }
 
@@ -476,6 +483,7 @@ mod tests {
                 id: Some("call_123".into()),
                 name: "get_weather".into(),
                 response: serde_json::json!({"temperature": 72}),
+                scheduling: None,
             }],
         });
         let json = encode(&msg).unwrap();
@@ -698,6 +706,19 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, ServerEvent::TurnComplete))
         );
+    }
+
+    #[test]
+    fn into_events_classifies_interaction_in_progress() {
+        let msg =
+            decode(r#"{"serverContent":{"turnComplete":true,"interactionStatus":"IN_PROGRESS"}}"#)
+                .unwrap();
+        let events = into_events(msg);
+
+        assert!(matches!(
+            events.as_slice(),
+            [ServerEvent::InteractionInProgress]
+        ));
     }
 
     #[test]
