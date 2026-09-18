@@ -720,7 +720,7 @@ mod tests {
         let session = FakeSession {
             events: Arc::new(Mutex::new(VecDeque::from(vec![ServerEvent::ToolCall(
                 vec![FunctionCallRequest {
-                    id: "call-1".into(),
+                    id: Some("call-1".into()),
                     name: "fake".into(),
                     args: serde_json::json!({}),
                 }],
@@ -741,7 +741,7 @@ mod tests {
         assert!(matches!(
             rx.recv().await,
             Some(RuntimeEvent::ToolCallRequested { call })
-                if call.id == "call-1" && call.name == "fake"
+                if call.id.as_deref() == Some("call-1") && call.name == "fake"
         ));
     }
 
@@ -758,9 +758,10 @@ mod tests {
         runtime.connect().await.expect("connect runtime");
         runtime
             .send_tool_response(vec![FunctionResponse {
-                id: "call-1".into(),
+                id: Some("call-1".into()),
                 name: "fake".into(),
                 response: serde_json::json!({ "ok": true }),
+                scheduling: None,
             }])
             .await
             .expect("send tool response");

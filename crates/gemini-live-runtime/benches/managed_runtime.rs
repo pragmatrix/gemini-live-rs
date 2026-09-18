@@ -154,7 +154,7 @@ fn bench_managed_runtime(c: &mut Criterion) {
             || {
                 managed_runtime_with_events(vec![RuntimeSessionObservation::Event(
                     ServerEvent::ToolCall(vec![FunctionCallRequest {
-                        id: "call-1".into(),
+                        id: Some("call-1".into()),
                         name: "bench_tool".into(),
                         args: serde_json::json!({ "ok": true }),
                     }]),

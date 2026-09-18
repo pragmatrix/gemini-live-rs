@@ -275,6 +275,7 @@ fn function_response(call: FunctionCallRequest, result: Result<Value, String>) -
                 "ok": true,
                 "result": response,
             }),
+            scheduling: None,
         },
         Err(message) => FunctionResponse {
             id: call.id,
@@ -285,6 +286,7 @@ fn function_response(call: FunctionCallRequest, result: Result<Value, String>) -
                     "message": message,
                 },
             }),
+            scheduling: None,
         },
     }
 }
@@ -391,7 +393,7 @@ mod tests {
         let adapter = TimerToolAdapter::new(TimerToolSelection { timer: true });
         let response = adapter
             .execute_call(FunctionCallRequest {
-                id: "call_1".into(),
+                id: Some("call_1".into()),
                 name: "set_timer".into(),
                 args: json!({
                     "seconds": 1,

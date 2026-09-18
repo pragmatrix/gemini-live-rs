@@ -832,7 +832,11 @@ async fn handle_runtime_event(
             tracing::warn!("Gemini runtime event stream lagged by {count} events");
         }
         RuntimeEvent::ToolCallRequested { call } => {
-            tracing::info!("tool call requested: {} ({})", call.name, call.id);
+            tracing::info!(
+                "tool call requested: {} ({})",
+                call.name,
+                call.id.as_deref().unwrap_or("<no id>")
+            );
         }
         RuntimeEvent::ToolCallCancellationRequested { ids } => {
             for call_id in ids {
@@ -924,6 +928,11 @@ async fn handle_server_event(
             }
             state.acknowledge_in_flight_notification()?;
             state.sync_turn_state_after_reply_end().await;
+        }
+        ServerEvent::InteractionInProgress => {
+            // The model turn ended while the dialog interaction stays active;
+            // keep the reply open for the follow-up turn.
+            tracing::debug!("Gemini Live interaction remains in progress");
         }
         ServerEvent::Interrupted => {
             state.clear_model_audio().await;

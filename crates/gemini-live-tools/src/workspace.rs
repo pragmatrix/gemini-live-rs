@@ -408,6 +408,7 @@ fn function_response(call: FunctionCallRequest, result: Result<Value, String>) -
                 "ok": true,
                 "result": response,
             }),
+            scheduling: None,
         },
         Err(message) => FunctionResponse {
             id: call.id,
@@ -418,6 +419,7 @@ fn function_response(call: FunctionCallRequest, result: Result<Value, String>) -
                     "message": message,
                 },
             }),
+            scheduling: None,
         },
     }
 }

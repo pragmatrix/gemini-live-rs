@@ -25,6 +25,7 @@ use gemini_live::types::{FunctionCallRequest, FunctionResponse, Tool};
 use serde_json::{Value, json};
 use tokio::task::{AbortHandle, JoinError, JoinHandle};
 
+use crate::adapter::call_key;
 use crate::error::HarnessError;
 use crate::registry::HarnessToolRegistry;
 use crate::store::Harness;
@@ -141,7 +142,8 @@ where
         &self,
         call: FunctionCallRequest,
     ) -> Result<FunctionResponse, ToolExecutionError> {
-        let call_id = call.id.clone();
+        let wire_id = call.id.clone();
+        let call_id = call_key(call.id.as_deref()).to_owned();
         let call_name = call.name.clone();
         let call_args = call.args.clone();
         let host_executor = Arc::clone(&self.host_executor);
@@ -192,7 +194,7 @@ where
                         .await;
                 });
                 Ok(background_task_response(
-                    call_id,
+                    wire_id,
                     call_name,
                     self.budget.inline_timeout,
                 ))
@@ -405,13 +407,14 @@ fn flatten_tool_join(
 }
 
 fn background_task_response(
-    call_id: String,
+    id: Option<String>,
     call_name: String,
     inline_timeout: Duration,
 ) -> FunctionResponse {
     FunctionResponse {
-        id: call_id,
+        id,
         name: call_name,
+        scheduling: None,
         response: json!({
             "message": format!(
                 "This tool is taking longer than {} ms, so it is continuing in the background. Continue the conversation; a later notification will report the result.",
@@ -555,6 +558,7 @@ mod tests {
                             "message": "Sleep finished.",
                         },
                     }),
+                    scheduling: None,
                 })
             })
         }
@@ -588,7 +592,7 @@ mod tests {
 
         let response = runtime
             .execute(FunctionCallRequest {
-                id: "call_1".into(),
+                id: Some("call_1".into()),
                 name: "sleep_tool".into(),
                 args: json!({}),
             })
@@ -661,7 +665,7 @@ mod tests {
 
         let response = runtime
             .execute(FunctionCallRequest {
-                id: "call_2".into(),
+                id: Some("call_2".into()),
                 name: "sleep_tool".into(),
                 args: json!({}),
             })

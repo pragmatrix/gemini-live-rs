@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::{AbortHandle, JoinHandle};
 
+use crate::adapter::{call_key, response_id};
 use crate::delivery::{PassiveNotificationDelivery, PassiveNotificationPump};
 use crate::error::HarnessError;
 use crate::executor::{HarnessToolBudget, HarnessToolRuntime};
@@ -63,8 +64,9 @@ impl HarnessToolCompletion {
             Ok(response) => Some(response),
             Err(ToolExecutionError::Cancelled { .. }) => None,
             Err(error) => Some(FunctionResponse {
-                id: self.call_id,
+                id: response_id(self.call_id),
                 name: self.call_name,
+                scheduling: None,
                 response: json!({
                     "ok": false,
                     "error": {
@@ -156,14 +158,15 @@ where
         call: FunctionCallRequest,
         completions: UnboundedSender<HarnessToolCompletion>,
     ) {
-        let call_id = call.id.clone();
+        let call_id = call_key(call.id.as_deref()).to_owned();
         let controller = self.clone();
         let abort_handle = tokio::spawn(async move {
+            let call_id = call_key(call.id.as_deref()).to_owned();
             let call_name = call.name.clone();
             let result = controller.execute(call.clone()).await;
-            controller.remove_in_flight_tool_dispatch(&call.id);
+            controller.remove_in_flight_tool_dispatch(&call_id);
             let _ = completions.send(HarnessToolCompletion {
-                call_id: call.id,
+                call_id,
                 call_name,
                 result,
             });
@@ -341,6 +344,7 @@ mod tests {
                     id: call.id,
                     name: call.name,
                     response: json!({ "ok": true }),
+                    scheduling: None,
                 })
             })
         }
@@ -370,7 +374,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         controller.spawn_tool_call(
             FunctionCallRequest {
-                id: "call_1".into(),
+                id: Some("call_1".into()),
                 name: "sleep_tool".into(),
                 args: json!({}),
             },
@@ -395,7 +399,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         controller.spawn_tool_call(
             FunctionCallRequest {
-                id: "call_2".into(),
+                id: Some("call_2".into()),
                 name: "sleep_tool".into(),
                 args: json!({}),
             },
@@ -454,7 +458,7 @@ mod tests {
         let response = completion
             .into_runtime_response()
             .expect("runtime response for failed tool call");
-        assert_eq!(response.id, "call_3");
+        assert_eq!(response.id.as_deref(), Some("call_3"));
         assert_eq!(response.name, "sleep_tool");
         assert_eq!(
             response.response,

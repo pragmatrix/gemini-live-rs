@@ -212,6 +212,7 @@ mod tests {
                     id: call.id,
                     name: call.name,
                     response: json!({ "ok": true }),
+                    scheduling: None,
                 })
             })
         }
@@ -244,7 +245,7 @@ mod tests {
         assert!(
             bridge.handle_runtime_event(&RuntimeEvent::ToolCallRequested {
                 call: FunctionCallRequest {
-                    id: "call_1".into(),
+                    id: Some("call_1".into()),
                     name: "sleep_tool".into(),
                     args: json!({}),
                 },
@@ -254,7 +255,7 @@ mod tests {
         let forwarded = bridge
             .recv_and_forward_tool_completion(|responses| async move {
                 assert_eq!(responses.len(), 1);
-                assert_eq!(responses[0].id, "call_1");
+                assert_eq!(responses[0].id.as_deref(), Some("call_1"));
                 Ok::<(), std::convert::Infallible>(())
             })
             .await

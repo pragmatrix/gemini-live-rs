@@ -37,6 +37,23 @@ impl ToolExecutionError {
     }
 }
 
+/// In-flight bookkeeping key for a server-issued tool call.
+///
+/// The Live API may omit a function call `id`. Bookkeeping still needs a
+/// stable key, and the empty string cannot collide with a server-assigned
+/// identifier, so a missing id maps to it.
+pub(crate) fn call_key(id: Option<&str>) -> &str {
+    id.unwrap_or_default()
+}
+
+/// Restores the wire `id` for a function response.
+///
+/// Only calls normalized through [`call_key`] carry an empty key; those were
+/// sent without an id and must omit it on the response as well.
+pub(crate) fn response_id(call_id: String) -> Option<String> {
+    (!call_id.is_empty()).then_some(call_id)
+}
+
 /// Metadata about a host-defined tool exposed to users or debuggers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolDescriptor {
