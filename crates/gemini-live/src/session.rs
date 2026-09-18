@@ -28,6 +28,8 @@
 //! to multiplex user commands and WebSocket frames.  Reconnection is
 //! transparent — messages buffer in the mpsc channel during downtime.
 
+use std::collections::VecDeque;
+use std::str;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -37,6 +39,7 @@ use base64::Engine;
 use bytes::Bytes;
 use futures_util::Stream;
 use tokio::sync::{broadcast, mpsc};
+use tokio::time::{self, Instant};
 
 use crate::audio::{AudioEncoder, INPUT_AUDIO_MIME, INPUT_SAMPLE_RATE};
 use crate::codec;
@@ -165,6 +168,7 @@ impl Session {
         // 3. Spawn the background runner
         let runner = Runner {
             cmd_rx,
+            pending_commands: VecDeque::new(),
             event_tx: event_tx.clone(),
             conn,
             config,
@@ -439,7 +443,20 @@ impl SharedState {
     }
 
     fn set_resume_handle(&self, handle: Option<String>) {
-        *self.resume_handle.lock().unwrap() = handle;
+        let mut current = self.resume_handle.lock().unwrap();
+        if *current == handle {
+            return;
+        }
+
+        let had_handle = current.is_some();
+        let has_handle = handle.is_some();
+        *current = handle;
+        tracing::trace!(
+            had_handle,
+            has_handle,
+            replaced = had_handle && has_handle,
+            "resumable state changed"
+        );
     }
 }
 
@@ -455,13 +472,38 @@ fn update_resume_handle(state: &SharedState, update: &SessionResumptionUpdate) {
 
 enum DisconnectReason {
     GoAway,
+    GoAwayDeadlineExceeded,
     ConnectionLost,
     UserClose,
     SendersDropped,
 }
 
+#[derive(PartialEq, Eq)]
+enum GoAwayState {
+    NotReceived,
+    Waiting,
+    WaitingUntil(Instant),
+}
+
+impl GoAwayState {
+    fn deadline(&self) -> Option<Instant> {
+        match self {
+            Self::WaitingUntil(deadline) => Some(*deadline),
+            Self::NotReceived | Self::Waiting => None,
+        }
+    }
+}
+
+/// Allows closing and resolving outstanding tool calls while awaiting a resumable checkpoint.
+fn command_can_send_during_go_away(command: &Command) -> bool {
+    matches!(command, Command::Close)
+        || matches!(command, Command::Send(message) if matches!(message.as_ref(), ClientMessage::ToolResponse(_)))
+}
+
 struct Runner {
     cmd_rx: mpsc::Receiver<Command>,
+    /// Inputs deferred after GoAway so they reach the resumed session rather than outlive its checkpoint.
+    pending_commands: VecDeque<Command>,
     event_tx: broadcast::Sender<ServerEvent>,
     conn: Connection,
     config: SessionConfig,
@@ -481,6 +523,11 @@ impl Runner {
                 DisconnectReason::UserClose | DisconnectReason::SendersDropped => {
                     self.state.set_status(SessionStatus::Closed);
                     tracing::info!("session closed");
+                    break;
+                }
+                DisconnectReason::GoAwayDeadlineExceeded => {
+                    self.state.set_status(SessionStatus::Closed);
+                    tracing::error!("session terminated after GoAway reconnect deadline");
                     break;
                 }
                 DisconnectReason::GoAway | DisconnectReason::ConnectionLost => {
@@ -517,10 +564,19 @@ impl Runner {
     /// Drive the connection: forward commands to the WebSocket, broadcast
     /// received frames as events.  Returns the reason for disconnection.
     async fn run_connected(&mut self) -> DisconnectReason {
+        let mut go_away = GoAwayState::NotReceived;
+
         loop {
             tokio::select! {
-                cmd = self.cmd_rx.recv() => {
+                cmd = next_command(
+                    &mut self.pending_commands,
+                    &mut self.cmd_rx,
+                    go_away == GoAwayState::NotReceived,
+                ) => {
                     match cmd {
+                        Some(command) if go_away != GoAwayState::NotReceived && !command_can_send_during_go_away(&command) => {
+                            self.pending_commands.push_back(command);
+                        }
                         Some(Command::Send(msg)) => { let msg = *msg;
                             match codec::encode_into(&mut self.send_json_buf, &msg) {
                                 Ok(()) => {
@@ -592,24 +648,29 @@ impl Runner {
                         }
                     }
                 }
+                () = wait_for_deadline(go_away.deadline()) => {
+                    let overdue = Instant::now().saturating_duration_since(
+                        go_away.deadline().expect("GoAway deadline selected"),
+                    );
+                    let message =
+                        "GoAway reconnect deadline exceeded while awaiting resumable state";
+                    tracing::error!(?overdue, message);
+                    let _ = self.event_tx.send(ServerEvent::Error(ApiError {
+                        message: message.into(),
+                    }));
+                    let _ = self.conn.send_close().await;
+                    return DisconnectReason::GoAwayDeadlineExceeded;
+                }
                 frame = self.conn.recv() => {
-                    match frame {
-                        Ok(RawFrame::Text(text)) => {
-                            if let Some(reason) = self.try_decode_and_process(&text) {
-                                return reason;
-                            }
-                        }
+                    let text = match &frame {
+                        Ok(RawFrame::Text(text)) => Some(text.as_str()),
                         Ok(RawFrame::Binary(data)) => {
                             // Gemini Live API may send JSON as binary frames.
-                            if let Ok(text) = std::str::from_utf8(&data)
-                                && let Some(reason) = self.try_decode_and_process(text)
-                            {
-                                return reason;
-                            }
+                            str::from_utf8(data).ok()
                         }
                         Ok(RawFrame::Close(reason)) => {
                             let _ = self.event_tx.send(ServerEvent::Closed {
-                                reason: reason.unwrap_or_default(),
+                                reason: reason.clone().unwrap_or_default(),
                             });
                             return DisconnectReason::ConnectionLost;
                         }
@@ -617,45 +678,38 @@ impl Runner {
                             tracing::warn!(error = %e, "recv error");
                             return DisconnectReason::ConnectionLost;
                         }
+                    };
+
+                    if let Some(text) = text {
+                        match codec::decode(text) {
+                            Ok(message) => {
+                                if let Some(state) = go_away_state(&message) {
+                                    go_away = state;
+                                }
+                                self.process_message(message);
+                            }
+                            Err(e) => tracing::warn!(error = %e, "failed to decode server message"),
+                        }
                     }
                 }
             }
-        }
-    }
 
-    /// Decode a server message, track session state, and broadcast events.
-    /// Returns `true` if the message contained a `goAway`.
-    /// Try to decode a JSON string and process it. Returns `Some(reason)` if
-    /// the connection loop should exit.
-    fn try_decode_and_process(&self, text: &str) -> Option<DisconnectReason> {
-        match codec::decode(text) {
-            Ok(msg) => {
-                if self.process_message(msg) {
-                    Some(DisconnectReason::GoAway)
-                } else {
-                    None
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to decode server message");
-                None
+            if go_away != GoAwayState::NotReceived && self.state.resume_handle().is_some() {
+                let _ = self.conn.send_close().await;
+                return DisconnectReason::GoAway;
             }
         }
     }
 
-    fn process_message(&self, msg: ServerMessage) -> bool {
+    fn process_message(&self, msg: ServerMessage) {
         // Track the latest resume handle for reconnection.
         if let Some(ref sr) = msg.session_resumption_update {
             update_resume_handle(&self.state, sr);
         }
 
-        let is_go_away = msg.go_away.is_some();
-
         for event in codec::into_events(msg) {
             let _ = self.event_tx.send(event);
         }
-
-        is_go_away
     }
 
     /// Attempt reconnection with exponential backoff.
@@ -677,7 +731,7 @@ impl Runner {
 
             let backoff = compute_backoff(policy, attempt);
             tracing::debug!(attempt, ?backoff, "reconnect backoff");
-            tokio::time::sleep(backoff).await;
+            time::sleep(backoff).await;
 
             let mut conn = match Connection::connect(&self.config.transport).await {
                 Ok(c) => c,
@@ -695,6 +749,39 @@ impl Runner {
                 }
             }
         }
+    }
+}
+
+fn go_away_state(message: &ServerMessage) -> Option<GoAwayState> {
+    message.go_away.as_ref().map(|go_away| {
+        match go_away
+            .time_left
+            .as_deref()
+            .and_then(codec::parse_protobuf_duration)
+        {
+            Some(time_left) => GoAwayState::WaitingUntil(Instant::now() + time_left),
+            None => GoAwayState::Waiting,
+        }
+    })
+}
+
+async fn next_command(
+    pending_commands: &mut VecDeque<Command>,
+    cmd_rx: &mut mpsc::Receiver<Command>,
+    send_pending: bool,
+) -> Option<Command> {
+    if send_pending && let Some(command) = pending_commands.pop_front() {
+        Some(command)
+    } else {
+        cmd_rx.recv().await
+    }
+}
+
+async fn wait_for_deadline(deadline: Option<Instant>) {
+    if let Some(deadline) = deadline {
+        time::sleep_until(deadline).await;
+    } else {
+        std::future::pending::<()>().await;
     }
 }
 
@@ -727,7 +814,7 @@ async fn do_handshake(
         .await
         .map_err(|e| SessionError::SetupFailed(format_error_chain(&e)))?;
 
-    tokio::time::timeout(SETUP_TIMEOUT, wait_setup_complete(conn))
+    time::timeout(SETUP_TIMEOUT, wait_setup_complete(conn))
         .await
         .map_err(|_| SessionError::SetupTimeout(SETUP_TIMEOUT))?
 }

@@ -216,7 +216,7 @@ pub fn into_events(msg: ServerMessage) -> Vec<ServerEvent> {
 
 /// Parse a protobuf Duration string (e.g. `"30s"`, `"1.5s"`) into a
 /// [`std::time::Duration`].
-fn parse_protobuf_duration(s: &str) -> Option<Duration> {
+pub(crate) fn parse_protobuf_duration(s: &str) -> Option<Duration> {
     let s = s.trim();
     let secs_str = s.strip_suffix('s')?;
     let secs: f64 = secs_str.parse().ok()?;
