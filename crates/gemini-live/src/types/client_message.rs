@@ -164,4 +164,6 @@ pub struct FunctionResponse {
     /// tool-response scheduling knobs inside this JSON object rather than as a
     /// top-level Rust field.
     pub response: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduling: Option<FunctionResponseScheduling>,
 }

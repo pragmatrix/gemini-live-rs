@@ -50,6 +50,8 @@ pub struct ServerContent {
     pub model_turn: Option<ServerModelTurn>,
     #[serde(default)]
     pub turn_complete: Option<bool>,
+    #[serde(default)]
+    pub interaction_status: Option<InteractionStatus>,
     /// `true` once the model has finished generating (the turn may still be
     /// open for transcription, grounding, etc.).
     #[serde(default)]
@@ -65,6 +67,13 @@ pub struct ServerContent {
     /// Grounding metadata (schema may evolve — kept as opaque JSON).
     pub grounding_metadata: Option<serde_json::Value>,
     pub url_context_metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum InteractionStatus {
+    InProgress,
+    Idle,
 }
 
 /// Server-emitted model content.
@@ -251,6 +260,7 @@ pub enum ServerEvent {
     GenerationComplete,
     /// The model's turn is fully complete.
     TurnComplete,
+    InteractionInProgress,
     /// The model's generation was interrupted by user activity.
     Interrupted,
 
@@ -280,13 +290,17 @@ pub enum ServerEvent {
     },
 
     /// The server will disconnect soon — the client should reconnect.
-    GoAway { time_left: Option<Duration> },
+    GoAway {
+        time_left: Option<Duration>,
+    },
 
     /// Token usage statistics.
     Usage(UsageMetadata),
 
     /// The WebSocket connection was closed.
-    Closed { reason: String },
+    Closed {
+        reason: String,
+    },
 
     /// An API-level error.
     Error(ApiError),

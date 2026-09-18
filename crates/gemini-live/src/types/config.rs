@@ -466,10 +466,19 @@ pub enum FunctionScheduling {
     Silent,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FunctionResponseScheduling {
+    Silent,
+    WhenIdle,
+    Interrupt,
+}
+
 /// Whether the function response blocks continued model generation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum FunctionBehavior {
+    Blocking,
     /// Model continues generating while awaiting the response.
     NonBlocking,
 }
