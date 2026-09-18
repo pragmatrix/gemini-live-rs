@@ -443,6 +443,14 @@ impl SharedState {
     }
 }
 
+fn update_resume_handle(state: &SharedState, update: &SessionResumptionUpdate) {
+    if update.resumable == Some(false) {
+        state.set_resume_handle(None);
+    } else if let Some(handle) = &update.new_handle {
+        state.set_resume_handle(Some(handle.clone()));
+    }
+}
+
 // ── Runner task ──────────────────────────────────────────────────────────────
 
 enum DisconnectReason {
@@ -637,10 +645,8 @@ impl Runner {
 
     fn process_message(&self, msg: ServerMessage) -> bool {
         // Track the latest resume handle for reconnection.
-        if let Some(ref sr) = msg.session_resumption_update
-            && let Some(ref handle) = sr.new_handle
-        {
-            self.state.set_resume_handle(Some(handle.clone()));
+        if let Some(ref sr) = msg.session_resumption_update {
+            update_resume_handle(&self.state, sr);
         }
 
         let is_go_away = msg.go_away.is_some();
@@ -655,6 +661,10 @@ impl Runner {
     /// Attempt reconnection with exponential backoff.
     async fn reconnect(&mut self) -> Result<Connection, SessionError> {
         let policy = &self.config.reconnect;
+        let resume_handle = self.state.resume_handle();
+        if self.config.setup.session_resumption.is_some() && resume_handle.is_none() {
+            return Err(SessionError::PossibleStateLoss);
+        }
         let mut attempt = 0u32;
 
         loop {
@@ -677,8 +687,7 @@ impl Runner {
                 }
             };
 
-            let resume_handle = self.state.resume_handle();
-            match do_handshake(&mut conn, &self.config.setup, resume_handle).await {
+            match do_handshake(&mut conn, &self.config.setup, resume_handle.clone()).await {
                 Ok(()) => return Ok(conn),
                 Err(e) => {
                     tracing::warn!(attempt, error = %e, "reconnect handshake failed");
@@ -812,7 +821,7 @@ fn compute_backoff(policy: &ReconnectPolicy, attempt: u32) -> Duration {
 #[cfg(test)]
 mod tests {
     use crate::error::{BearerTokenError, ConnectError};
-    use crate::types::HistoryConfig;
+    use crate::types::{HistoryConfig, SessionResumptionUpdate};
 
     use super::*;
 
@@ -858,6 +867,22 @@ mod tests {
         assert_eq!(state.resume_handle().as_deref(), Some("h2"));
 
         state.set_resume_handle(None);
+        assert!(state.resume_handle().is_none());
+    }
+
+    #[test]
+    fn non_resumable_update_invalidates_checkpoint() {
+        let state = SharedState::new();
+        state.set_resume_handle(Some("h1".into()));
+
+        update_resume_handle(
+            &state,
+            &SessionResumptionUpdate {
+                new_handle: None,
+                resumable: Some(false),
+            },
+        );
+
         assert!(state.resume_handle().is_none());
     }
 

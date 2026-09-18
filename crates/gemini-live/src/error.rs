@@ -103,6 +103,8 @@ pub enum SessionError {
     Api(String),
     #[error("connection lost and reconnection failed after {attempts} attempts")]
     ReconnectExhausted { attempts: u32 },
+    #[error("connection lost without a valid session-resumption checkpoint; possible state loss")]
+    PossibleStateLoss,
     #[error("session closed")]
     Closed,
     #[error(transparent)]
