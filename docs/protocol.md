@@ -153,7 +153,7 @@ better natural home in one specific Rust type.
 - Built-in Live tools are no longer limited to function calling. Search
   support should be tracked separately from custom tool declarations.
 - The official tool docs place `behavior=NON_BLOCKING` on function
-  declarations, but `scheduling` belongs inside
-  `FunctionResponse.response`.
+  declarations, while response `scheduling` is a sibling of the
+  `FunctionResponse.response` payload.
 - Live model names and shutdown dates have already changed materially across
   2025-2026. Treat model lifecycle drift as a protocol maintenance issue.
