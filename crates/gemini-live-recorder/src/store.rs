@@ -50,7 +50,7 @@ impl WindowRecord {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn success(
         model: &str,
-        tool_call_id: String,
+        tool_call_id: Option<String>,
         recorded_at: DateTime<Utc>,
         window_id: u64,
         started_at: DateTime<Utc>,
@@ -75,7 +75,7 @@ impl WindowRecord {
             observed_frame_count,
             observed_audio_chunk_count,
             model: model.to_string(),
-            tool_call_id: Some(tool_call_id),
+            tool_call_id,
             activity: Some(activity),
             summary: Some(summary),
             apps: Some(apps),

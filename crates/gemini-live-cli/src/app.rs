@@ -431,7 +431,11 @@ impl App {
                 ServerEventEffect::None
             }
             RuntimeEvent::ToolCallRequested { call } => {
-                self.sys(format!("[tool] requested {} ({})", call.name, call.id));
+                self.sys(format!(
+                    "[tool] requested {} ({})",
+                    call.name,
+                    call.id.as_deref().unwrap_or("<none>")
+                ));
                 ServerEventEffect::None
             }
             RuntimeEvent::ToolCallCancellationRequested { ids } => {

@@ -90,18 +90,19 @@ pub(crate) fn declaration() -> FunctionDeclaration {
     }
 }
 
-pub(crate) fn ok_response(call_id: String) -> FunctionResponse {
+pub(crate) fn ok_response(call_id: Option<String>) -> FunctionResponse {
     FunctionResponse {
         id: call_id,
         name: SUBMIT_MINUTE_SUMMARY_TOOL.into(),
         response: json!({
             "ok": true
         }),
+        scheduling: None,
     }
 }
 
 pub(crate) fn error_response(
-    call_id: String,
+    call_id: Option<String>,
     call_name: String,
     message: impl Into<String>,
 ) -> FunctionResponse {
@@ -114,6 +115,7 @@ pub(crate) fn error_response(
                 "message": message.into()
             }
         }),
+        scheduling: None,
     }
 }
 

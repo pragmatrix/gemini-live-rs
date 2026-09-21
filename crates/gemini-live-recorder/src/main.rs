@@ -505,7 +505,7 @@ impl RecorderApp {
         let call_id = call.id.clone();
         let call_name = call.name.clone();
         info!(
-            tool_call_id = %call_id,
+            tool_call_id = call_id.as_deref().unwrap_or("<none>"),
             tool_name = %call_name,
             summary_window_id = self.current_summary.as_ref().map(|state| state.window.id),
             "received tool call from model"
@@ -525,7 +525,7 @@ impl RecorderApp {
         if call.name != SUBMIT_MINUTE_SUMMARY_TOOL {
             state.note_issue(format!("unexpected tool `{}`", call.name));
             warn!(
-                tool_call_id = %call_id,
+                tool_call_id = call_id.as_deref().unwrap_or("<none>"),
                 tool_name = %call_name,
                 expected_tool_name = SUBMIT_MINUTE_SUMMARY_TOOL,
                 summary_window_id = state.window.id,
@@ -544,7 +544,7 @@ impl RecorderApp {
         if state.accepted_submission {
             state.note_issue("received duplicate submit_minute_summary call");
             warn!(
-                tool_call_id = %call_id,
+                tool_call_id = call_id.as_deref().unwrap_or("<none>"),
                 tool_name = %call_name,
                 summary_window_id = state.window.id,
                 "rejecting duplicate minute summary submission"
@@ -570,7 +570,7 @@ impl RecorderApp {
                     uncertain,
                 } = submission;
                 info!(
-                    tool_call_id = %call_id,
+                    tool_call_id = call_id.as_deref().unwrap_or("<none>"),
                     summary_window_id = window.id,
                     activity = %activity,
                     confidence,
@@ -603,7 +603,7 @@ impl RecorderApp {
             Err(error) => {
                 state.note_issue(error.clone());
                 warn!(
-                    tool_call_id = %call_id,
+                    tool_call_id = call_id.as_deref().unwrap_or("<none>"),
                     tool_name = %call_name,
                     summary_window_id = state.window.id,
                     error = %error,

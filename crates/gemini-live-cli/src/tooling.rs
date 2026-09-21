@@ -427,6 +427,7 @@ impl ToolRuntime {
                     "message": format!("unknown local tool `{}`", call.name),
                 },
             }),
+            scheduling: None,
         }
     }
 
@@ -539,6 +540,7 @@ fn success_response(call: FunctionCallRequest, response: serde_json::Value) -> F
             "ok": true,
             "result": response,
         }),
+        scheduling: None,
     }
 }
 
@@ -552,6 +554,7 @@ fn error_response(call: FunctionCallRequest, message: String) -> FunctionRespons
                 "message": message,
             },
         }),
+        scheduling: None,
     }
 }
 
