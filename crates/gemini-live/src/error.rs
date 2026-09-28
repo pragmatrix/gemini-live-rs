@@ -97,6 +97,10 @@ pub enum RecvError {
 pub enum SessionError {
     #[error("setup failed: {0}")]
     SetupFailed(String),
+    /// The transport could not be established, for example because the
+    /// credentials were rejected or the endpoint was unreachable.
+    #[error(transparent)]
+    Connect(#[from] ConnectError),
     #[error("setup timed out after {0:?}")]
     SetupTimeout(Duration),
     #[error("API error: {0}")]

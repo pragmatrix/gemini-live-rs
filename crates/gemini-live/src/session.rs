@@ -156,9 +156,7 @@ impl Session {
 
         // 1. Establish WebSocket connection
         state.set_status(SessionStatus::Connecting);
-        let mut conn = Connection::connect(&config.transport)
-            .await
-            .map_err(|e| SessionError::SetupFailed(format_error_chain(&e)))?;
+        let mut conn = Connection::connect(&config.transport).await?;
 
         // 2. Send setup and await setupComplete
         do_handshake(&mut conn, &config.setup, None).await?;
