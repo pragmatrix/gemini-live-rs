@@ -283,7 +283,9 @@ impl Connection {
         install_rustls_crypto_provider();
 
         let request = build_request(config).await?;
-        let endpoint = endpoint_display(request.uri());
+        // The connect call consumes the request, so keep its URI to name the
+        // endpoint; the display string is built only if the handshake fails.
+        let endpoint = request.uri().clone();
         let mut ws_config = WebSocketConfig::default();
         ws_config.write_buffer_size = config.write_buffer_size;
         ws_config.max_write_buffer_size = config.write_buffer_size * 2;
@@ -503,11 +505,11 @@ async fn build_bearer_header(auth: &Auth) -> Result<Option<HeaderValue>, Connect
     }
 }
 
-fn classify_connect_error(e: tungstenite::Error, endpoint: &str) -> ConnectError {
+fn classify_connect_error(e: tungstenite::Error, endpoint: &Uri) -> ConnectError {
     match e {
         tungstenite::Error::Http(response) => ConnectError::Rejected {
             status: response.status().as_u16(),
-            url: endpoint.to_owned(),
+            url: endpoint_display(endpoint),
         },
         other => ConnectError::Ws(other),
     }
