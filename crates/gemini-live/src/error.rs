@@ -66,8 +66,12 @@ pub enum ConnectError {
     Tls(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("connection timed out after {0:?}")]
     Timeout(Duration),
-    #[error("WebSocket handshake rejected: {status}")]
-    Rejected { status: u16 },
+    #[error("WebSocket handshake rejected: {status} at {url}")]
+    Rejected {
+        status: u16,
+        /// Endpoint the handshake was sent to, without query parameters.
+        url: String,
+    },
     #[error("WebSocket error: {0}")]
     Ws(#[source] tokio_tungstenite::tungstenite::Error),
 }

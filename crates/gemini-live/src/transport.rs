@@ -18,7 +18,7 @@
 //! |---|---|---|
 //! | [`Endpoint::GeminiApi`] | [`Auth::ApiKey`] | `wss://generativelanguage.googleapis.com/ws/…v1beta.GenerativeService.BidiGenerateContent?key=…` |
 //! | [`Endpoint::GeminiApi`] | [`Auth::EphemeralToken`] | `wss://generativelanguage.googleapis.com/ws/…v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=…` |
-//! | [`Endpoint::VertexAi`] | [`Auth::BearerToken`] or [`Auth::BearerTokenProvider`] | `wss://{location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent` + `Authorization: Bearer …` |
+//! | [`Endpoint::VertexAi`] | [`Auth::BearerToken`] or [`Auth::BearerTokenProvider`] | `wss://aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent` for `global`, `wss://aiplatform.{us,eu}.rep.googleapis.com/…` for the `us`/`eu` multi-regions, `wss://{location}-aiplatform.googleapis.com/…` for other regions, plus `Authorization: Bearer …` |
 //!
 //! [`Endpoint::Custom`] is the explicit escape hatch for tests, proxies, and
 //! already-routed deployments.
@@ -33,7 +33,7 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::{HeaderValue, Request, header::AUTHORIZATION};
+use tokio_tungstenite::tungstenite::http::{HeaderValue, Request, Uri, header::AUTHORIZATION};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async_with_config};
@@ -54,6 +54,10 @@ const GEMINI_EPHEMERAL_TOKEN_PATH: &str =
     "/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained";
 const VERTEX_AI_PATH: &str = "/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent";
 
+/// Locations served through a jurisdiction-scoped host rather than a regional
+/// one (see [`Endpoint::VertexAi`]).
+const VERTEX_AI_MULTI_REGIONS: [&str; 2] = ["us", "eu"];
+
 // ── Endpoint ────────────────────────────────────────────────────────────────
 
 /// WebSocket endpoint family.
@@ -67,6 +71,11 @@ pub enum Endpoint {
     #[default]
     GeminiApi,
     /// Vertex AI Live endpoint pinned to the current `v1` RPC path.
+    ///
+    /// `location` selects the host: `us` and `eu` are jurisdiction-scoped
+    /// multi-regions served from `aiplatform.{location}.rep.googleapis.com`,
+    /// `global` is served from `aiplatform.googleapis.com`, and every other
+    /// value is a region served from `{location}-aiplatform.googleapis.com`.
     ///
     /// `setup.model` must use the full Vertex resource name, for example:
     /// `projects/{project}/locations/{location}/publishers/google/models/{model}`.
@@ -274,6 +283,7 @@ impl Connection {
         install_rustls_crypto_provider();
 
         let request = build_request(config).await?;
+        let endpoint = endpoint_display(request.uri());
         let mut ws_config = WebSocketConfig::default();
         ws_config.write_buffer_size = config.write_buffer_size;
         ws_config.max_write_buffer_size = config.write_buffer_size * 2;
@@ -285,7 +295,7 @@ impl Connection {
         let (ws_stream, _response) = tokio::time::timeout(config.connect_timeout, connect_fut)
             .await
             .map_err(|_| ConnectError::Timeout(config.connect_timeout))?
-            .map_err(classify_connect_error)?;
+            .map_err(|e| classify_connect_error(e, &endpoint))?;
 
         let (sink, stream) = ws_stream.split();
         tracing::debug!("WebSocket connection established");
@@ -432,7 +442,8 @@ fn build_url(config: &TransportConfig) -> Result<Url, ConnectError> {
         }
         .map_err(|e| ConnectError::Config(format!("invalid Gemini API endpoint URL: {e}")))?,
         Endpoint::VertexAi { location } => Url::parse(&format!(
-            "wss://{location}-aiplatform.googleapis.com{VERTEX_AI_PATH}"
+            "wss://{}{VERTEX_AI_PATH}",
+            vertex_ai_host(location)
         ))
         .map_err(|e| ConnectError::Config(format!("invalid Vertex AI endpoint URL: {e}")))?,
         Endpoint::Custom(url) => Url::parse(url)
@@ -461,6 +472,17 @@ fn gemini_path_for_auth(auth: &Auth) -> &'static str {
     }
 }
 
+/// Host serving `location` on Vertex AI, for `wss://{host}{VERTEX_AI_PATH}`.
+fn vertex_ai_host(location: &str) -> String {
+    if VERTEX_AI_MULTI_REGIONS.contains(&location) {
+        format!("aiplatform.{location}.rep.googleapis.com")
+    } else if location == "global" {
+        "aiplatform.googleapis.com".to_owned()
+    } else {
+        format!("{location}-aiplatform.googleapis.com")
+    }
+}
+
 async fn build_bearer_header(auth: &Auth) -> Result<Option<HeaderValue>, ConnectError> {
     match auth {
         Auth::BearerToken(token) => HeaderValue::from_str(&format!("Bearer {token}"))
@@ -481,12 +503,26 @@ async fn build_bearer_header(auth: &Auth) -> Result<Option<HeaderValue>, Connect
     }
 }
 
-fn classify_connect_error(e: tungstenite::Error) -> ConnectError {
+fn classify_connect_error(e: tungstenite::Error, endpoint: &str) -> ConnectError {
     match e {
         tungstenite::Error::Http(response) => ConnectError::Rejected {
             status: response.status().as_u16(),
+            url: endpoint.to_owned(),
         },
         other => ConnectError::Ws(other),
+    }
+}
+
+/// The handshake URL without its query, so a rejection can name the endpoint it
+/// tried without leaking a credential that travels as a query parameter.
+fn endpoint_display(uri: &Uri) -> String {
+    match uri.authority() {
+        Some(authority) => format!(
+            "{}://{authority}{}",
+            uri.scheme_str().unwrap_or("wss"),
+            uri.path()
+        ),
+        None => uri.to_string(),
     }
 }
 
@@ -538,6 +574,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_vertex_ai_multi_region_and_global_use_their_own_hosts() {
+        for (location, host) in [
+            ("us", "aiplatform.us.rep.googleapis.com"),
+            ("eu", "aiplatform.eu.rep.googleapis.com"),
+            ("global", "aiplatform.googleapis.com"),
+            ("us-central1", "us-central1-aiplatform.googleapis.com"),
+        ] {
+            let config = TransportConfig {
+                endpoint: Endpoint::VertexAi {
+                    location: location.into(),
+                },
+                auth: Auth::BearerToken("vertex-token".into()),
+                ..Default::default()
+            };
+            let request = build_request(&config).await.expect("request");
+
+            assert_eq!(
+                request.uri().to_string(),
+                format!(
+                    "wss://{host}/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent"
+                ),
+                "location `{location}`"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn request_vertex_ai_uses_bearer_header() {
         let config = TransportConfig {
             endpoint: Endpoint::VertexAi {
@@ -572,6 +635,18 @@ mod tests {
 
         assert_eq!(request.uri(), "wss://custom.example.com/ws");
         assert!(request.headers().get(AUTHORIZATION).is_none());
+    }
+
+    #[test]
+    fn endpoint_display_omits_query_credentials() {
+        let uri: Uri = "wss://generativelanguage.googleapis.com/ws/x?key=secret&access_token=s"
+            .parse()
+            .expect("uri");
+
+        assert_eq!(
+            endpoint_display(&uri),
+            "wss://generativelanguage.googleapis.com/ws/x"
+        );
     }
 
     #[tokio::test]
